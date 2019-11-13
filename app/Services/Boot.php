@@ -8,10 +8,7 @@ class Boot
 {
     public static function setDebug()
     {
-        // debug
-        if (Config::get('debug') == 'true') {
-            define('DEBUG', true);
-        }
+        define('DEBUG', Config::get('debug'));
         View::$beginTime = microtime(true);
     }
 
@@ -31,7 +28,7 @@ class Boot
         // Init Eloquent ORM Connection
         $capsule = new Capsule();
         $capsule->addConnection(Config::getDbConfig());
-        if (Config::get('enable_radius') == 'true') {
+        if (Config::get('enable_radius') == true) {
             $capsule->addConnection(Config::getRadiusDbConfig(), 'radius');
         }
         $capsule->bootEloquent();

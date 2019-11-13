@@ -25,7 +25,6 @@ use App\Utils\QQWry;
 use App\Utils\GA;
 use App\Utils\Telegram;
 use ArrayObject;
-use CloudXNS\Api;
 use App\Models\Disconnect;
 use App\Models\UnblockIp;
 use Exception;
@@ -71,7 +70,7 @@ class Job
                 'mysqldump --opt --user=' . Config::get('db_username') . ' --password=' . Config::get('db_password') . ' --host=' . $db_address_array[0] . ' ' . (isset($db_address_array[1]) ? '-P ' . $db_address_array[1] : '') . ' -d ' . Config::get('db_database') . ' alive_ip ss_node_info ss_node_online_log user_traffic_log detect_log telegram_session >> /tmp/ssmodbackup/mod.sql',
                 $ret
             );
-            if (Config::get('enable_radius') == 'true') {
+            if (Config::get('enable_radius') == true) {
                 $db_address_array = explode(':', Config::get('radius_db_host'));
                 system(
                     'mysqldump --user=' . Config::get('radius_db_user') . ' --password=' . Config::get('radius_db_password') . ' --host=' . $db_address_array[0] . ' ' . (isset($db_address_array[1]) ? '-P ' . $db_address_array[1] : '') . '' . Config::get('radius_db_database') . '> /tmp/ssmodbackup/radius.sql',
@@ -97,7 +96,7 @@ class Job
         system('rm -rf /tmp/ssmodbackup', $ret);
         system('rm /tmp/ssmodbackup.zip', $ret);
 
-        if (Config::get('backup_notify') == 'true') {
+        if (Config::get('backup_notify') == true) {
             Telegram::Send('备份完毕了喵~今天又是安全祥和的一天呢。');
         }
     }
@@ -226,34 +225,15 @@ class Job
             }
         }
 
-
-        #https://github.com/shuax/QQWryUpdate/blob/master/update.php
-
-        $copywrite = file_get_contents('http://update.cz88.net/ip/copywrite.rar');
-
         $adminUser = User::where('is_admin', '=', '1')->get();
 
-        $newmd5 = md5($copywrite);
-        $oldmd5 = file_get_contents(BASE_PATH . '/storage/qqwry.md5');
-
-        if ($newmd5 != $oldmd5) {
-            file_put_contents(BASE_PATH . '/storage/qqwry.md5', $newmd5);
-            $qqwry = file_get_contents('http://update.cz88.net/ip/qqwry.rar');
-            if ($qqwry != '') {
-                $key = unpack('V6', $copywrite)[6];
-                for ($i = 0; $i < 0x200; $i++) {
-                    $key *= 0x805;
-                    $key++;
-                    $key &= 0xFF;
-                    $qqwry[$i] = chr(ord($qqwry[$i]) ^ $key);
-                }
-                $qqwry = gzuncompress($qqwry);
-                rename(BASE_PATH . '/storage/qqwry.dat', BASE_PATH . '/storage/qqwry.dat.bak');
-                $fp = fopen(BASE_PATH . '/storage/qqwry.dat', 'wb');
-                if ($fp) {
-                    fwrite($fp, $qqwry);
-                    fclose($fp);
-                }
+        $qqwry = file_get_contents('https://qqwry.mirror.noc.one/QQWry.Dat?from=sspanel_uim');
+        if ($qqwry != '') {
+            rename(BASE_PATH . '/storage/qqwry.dat', BASE_PATH . '/storage/qqwry.dat.bak');
+            $fp = fopen(BASE_PATH . '/storage/qqwry.dat', 'wb');
+            if ($fp) {
+                fwrite($fp, $qqwry);
+                fclose($fp);
             }
         }
 
@@ -452,12 +432,12 @@ class Job
         $adminUser = User::where('is_admin', '=', '1')->get();
 
         //节点掉线检测
-        if (Config::get('enable_detect_offline') == 'true') {
+        if (Config::get('enable_detect_offline') == true) {
             $nodes = Node::all();
 
             foreach ($nodes as $node) {
                 if ($node->isNodeOnline() === false && !file_exists(BASE_PATH . '/storage/' . $node->id . '.offline')) {
-                    if (Config::get('useScFtqq') == 'true' && Config::get('enable_detect_offline_useScFtqq') == 'true') {
+                    if (Config::get('useScFtqq') == true && Config::get('enable_detect_offline_useScFtqq') == true) {
                         $ScFtqq_SCKEY = Config::get('ScFtqq_SCKEY');
                         $text = '管理员您好，系统发现节点 ' . $node->name . ' 掉线了，请您及时处理。';
                         $postdata = http_build_query(
@@ -487,60 +467,12 @@ class Job
                             Mail::send($to, $subject, 'news/warn.tpl', [
                                 'user' => $user,
                                 'text' => $text
-                            ], [
                             ]);
                         } catch (Exception $e) {
                             echo $e->getMessage();
                         }
 
-                        if (Config::get('enable_cloudxns') == 'true' && ($node->sort == 0 || $node->sort == 10 || $node->sort == 12 || $node->sort == 13)) {
-                            $api = new Api();
-                            $api->setApiKey(Config::get('cloudxns_apikey'));//修改成自己API KEY
-                            $api->setSecretKey(Config::get('cloudxns_apisecret'));//修改成自己的SECERET KEY
-
-                            $api->setProtocol(true);
-
-                            $domain_json = json_decode($api->domain->domainList());
-
-                            foreach ($domain_json->data as $domain) {
-                                if (strpos($domain->domain, Config::get('cloudxns_domain')) !== false) {
-                                    $domain_id = $domain->id;
-                                }
-                            }
-
-                            $record_json = json_decode($api->record->recordList($domain_id, 0, 0, 2000));
-
-                            foreach ($record_json->data as $record) {
-                                if (($record->host . '.' . Config::get('cloudxns_domain')) == $node->server) {
-                                    $record_id = $record->record_id;
-
-                                    $Temp_node = Node::where('node_class', '<=', $node->node_class)->where(
-                                        static function ($query) use ($node) {
-                                            $query->where('node_group', '=', $node->node_group)
-                                                ->orWhere('node_group', '=', 0);
-                                        }
-                                    )->whereRaw('UNIX_TIMESTAMP()-`node_heartbeat`<300')->first();
-
-                                    if ($Temp_node != null) {
-                                        $api->record->recordUpdate(
-                                            $domain_id,
-                                            $record->host,
-                                            $Temp_node->server,
-                                            'CNAME',
-                                            55,
-                                            60,
-                                            1,
-                                            '',
-                                            $record_id
-                                        );
-                                    }
-
-                                    $notice_text = '喵喵喵~ ' . $node->name . ' 节点掉线了喵~域名解析被切换到了 ' . $Temp_node->name . ' 上了喵~';
-                                }
-                            }
-                        } else {
-                            $notice_text = '喵喵喵~ ' . $node->name . ' 节点掉线了喵~';
-                        }
+                        $notice_text = '喵喵喵~ ' . $node->name . ' 节点掉线了喵~';
                     }
 
                     Telegram::Send($notice_text);
@@ -553,12 +485,12 @@ class Job
                     fwrite($myfile, $txt);
                     fclose($myfile);
                 } elseif ($node->isNodeOnline() === true && file_exists(BASE_PATH . '/storage/' . $node->id . '.offline')) {
-                    if (Config::get('useScFtqq') == 'true' && Config::get('enable_detect_offline_useScFtqq') == 'true') {
+                    if (Config::get('useScFtqq') == true && Config::get('enable_detect_offline_useScFtqq') == true) {
                         $ScFtqq_SCKEY = Config::get('ScFtqq_SCKEY');
                         $text = '管理员您好，系统发现节点 ' . $node->name . ' 恢复上线了。';
                         $postdata = http_build_query(
                             array(
-                                'text' => Config::get('appName') . '-节点掉线了',
+                                'text' => Config::get('appName') . '-节点恢复上线了',
                                 'desp' => $text
                             )
                         );
@@ -583,50 +515,12 @@ class Job
                             Mail::send($to, $subject, 'news/warn.tpl', [
                                 'user' => $user,
                                 'text' => $text
-                            ], [
                             ]);
                         } catch (Exception $e) {
                             echo $e->getMessage();
                         }
 
-                        if (Config::get('enable_cloudxns') == 'true' && ($node->sort == 0 || $node->sort == 10 || $node->sort == 12 || $node->sort == 13)) {
-                            $api = new Api();
-                            $api->setApiKey(Config::get('cloudxns_apikey'));//修改成自己API KEY
-                            $api->setSecretKey(Config::get('cloudxns_apisecret'));//修改成自己的SECERET KEY
-                            $api->setProtocol(true);
-
-                            $domain_json = json_decode($api->domain->domainList());
-
-                            foreach ($domain_json->data as $domain) {
-                                if (strpos($domain->domain, Config::get('cloudxns_domain')) !== false) {
-                                    $domain_id = $domain->id;
-                                }
-                            }
-
-                            $record_json = json_decode($api->record->recordList($domain_id, 0, 0, 2000));
-
-                            foreach ($record_json->data as $record) {
-                                if (($record->host . '.' . Config::get('cloudxns_domain')) == $node->server) {
-                                    $record_id = $record->record_id;
-
-                                    $api->record->recordUpdate(
-                                        $domain_id,
-                                        $record->host,
-                                        $node->getNodeIp(),
-                                        'A',
-                                        55,
-                                        600,
-                                        1,
-                                        '',
-                                        $record_id
-                                    );
-                                }
-                            }
-
-                            $notice_text = '喵喵喵~ ' . $node->name . ' 节点恢复了喵~域名解析被切换回来了喵~';
-                        } else {
-                            $notice_text = '喵喵喵~ ' . $node->name . ' 节点恢复了喵~';
-                        }
+                        $notice_text = '喵喵喵~ ' . $node->name . ' 节点恢复了喵~';
                     }
 
                     Telegram::Send($notice_text);
@@ -638,7 +532,7 @@ class Job
 
 
         //登录地检测
-        if (Config::get('login_warn') == 'true') {
+        if (Config::get('login_warn') == true) {
             $iplocation = new QQWry();
             $Logs = LoginIp::where('datetime', '>', time() - 60)->get();
             foreach ($Logs as $log) {
@@ -732,7 +626,7 @@ class Job
             if (!file_exists(BASE_PATH . '/storage/traffic_notified/') && !mkdir($concurrentDirectory = BASE_PATH . '/storage/traffic_notified/') && !is_dir($concurrentDirectory)) {
                 throw new RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
             }
-            if (Config::get('notify_limit_mode') != 'false') {
+            if (Config::get('notify_limit_mode') != false) {
                 $user_traffic_left = $user->transfer_enable - $user->u - $user->d;
                 $under_limit = 'false';
 
@@ -940,48 +834,7 @@ class Job
                             } catch (Exception $e) {
                                 echo $e->getMessage();
                             }
-                            if (Config::get('enable_cloudxns') == 'true' && ($node->sort == 0 || $node->sort == 10 || $node->sort == 12 || $node->sort == 13)) {
-                                $api = new Api();
-                                $api->setApiKey(Config::get('cloudxns_apikey'));
-                                //修改成自己API KEY
-                                $api->setSecretKey(Config::get('cloudxns_apisecret'));
-                                //修改成自己的SECERET KEY
-                                $api->setProtocol(true);
-                                $domain_json = json_decode($api->domain->domainList());
-                                foreach ($domain_json->data as $domain) {
-                                    if (strpos($domain->domain, Config::get('cloudxns_domain')) !== false) {
-                                        $domain_id = $domain->id;
-                                    }
-                                }
-                                $record_json = json_decode($api->record->recordList($domain_id, 0, 0, 2000));
-                                foreach ($record_json->data as $record) {
-                                    if (($record->host . '.' . Config::get('cloudxns_domain')) == $node->server) {
-                                        $record_id = $record->record_id;
-                                        $Temp_node = Node::where('node_class', '<=', $node->node_class)->where(
-                                            static function ($query) use ($node) {
-                                                $query->where('node_group', '=', $node->node_group)
-                                                    ->orWhere('node_group', '=', 0);
-                                            }
-                                        )->whereRaw('UNIX_TIMESTAMP()-`node_heartbeat`<300')->first();
-                                        if ($Temp_node != null) {
-                                            $api->record->recordUpdate(
-                                                $domain_id,
-                                                $record->host,
-                                                $Temp_node->server,
-                                                'CNAME',
-                                                55,
-                                                60,
-                                                1,
-                                                '',
-                                                $record_id
-                                            );
-                                        }
-                                        $notice_text = '喵喵喵~ ' . $node->name . ' 节点被墙了喵~域名解析被切换到了 ' . $Temp_node->name . ' 上了喵~';
-                                    }
-                                }
-                            } else {
-                                $notice_text = '喵喵喵~ ' . $node->name . ' 节点被墙了喵~';
-                            }
+                            $notice_text = '喵喵喵~ ' . $node->name . ' 节点被墙了喵~';
                         }
                         Telegram::Send($notice_text);
                         $file_node = fopen(BASE_PATH . '/storage/' . $node->id . '.gfw', 'wb+');
@@ -1006,40 +859,7 @@ class Job
                             } catch (Exception $e) {
                                 echo $e->getMessage();
                             }
-                            if (Config::get('enable_cloudxns') == 'true' && ($node->sort == 0 || $node->sort == 10 || $node->sort == 12 || $node->sort == 13)) {
-                                $api = new Api();
-                                $api->setApiKey(Config::get('cloudxns_apikey'));
-                                //修改成自己API KEY
-                                $api->setSecretKey(Config::get('cloudxns_apisecret'));
-                                //修改成自己的SECERET KEY
-                                $api->setProtocol(true);
-                                $domain_json = json_decode($api->domain->domainList());
-                                foreach ($domain_json->data as $domain) {
-                                    if (strpos($domain->domain, Config::get('cloudxns_domain')) !== false) {
-                                        $domain_id = $domain->id;
-                                    }
-                                }
-                                $record_json = json_decode($api->record->recordList($domain_id, 0, 0, 2000));
-                                foreach ($record_json->data as $record) {
-                                    if (($record->host . '.' . Config::get('cloudxns_domain')) == $node->server) {
-                                        $record_id = $record->record_id;
-                                        $api->record->recordUpdate(
-                                            $domain_id,
-                                            $record->host,
-                                            $node->getNodeIp(),
-                                            'A',
-                                            55,
-                                            600,
-                                            1,
-                                            '',
-                                            $record_id
-                                        );
-                                    }
-                                }
-                                $notice_text = '喵喵喵~ ' . $node->name . ' 节点恢复了喵~域名解析被切换回来了喵~';
-                            } else {
-                                $notice_text = '喵喵喵~ ' . $node->name . ' 节点恢复了喵~';
-                            }
+                            $notice_text = '喵喵喵~ ' . $node->name . ' 节点恢复了喵~';
                         }
                         Telegram::Send($notice_text);
                         unlink(BASE_PATH . '/storage/' . $node->id . '.gfw');

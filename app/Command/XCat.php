@@ -12,7 +12,6 @@ use App\Models\Relay;
 use App\Services\Gateway\ChenPay;
 use App\Utils\Hash;
 use App\Utils\Tools;
-use App\Utils\Discord;
 use App\Services\Config;
 
 use App\Utils\GA;
@@ -39,8 +38,6 @@ class XCat
                 return $this->createAdmin();
             case ('resetTraffic'):
                 return $this->resetTraffic();
-            case ('setDiscord'):
-                return Discord::set();
             case ('setTelegram'):
                 return $this->setTelegram();
             case ('initQQWry'):
@@ -111,7 +108,6 @@ class XCat
         echo(PHP_EOL . '用法： php xcat [选项]' . PHP_EOL);
         echo('常用选项:' . PHP_EOL);
         echo('  createAdmin - 创建管理员帐号' . PHP_EOL);
-        echo('  setDiscord - 设置 Discord 机器人' . PHP_EOL);
         echo('  setTelegram - 设置 Telegram 机器人' . PHP_EOL);
         echo('  cleanRelayRule - 清除所有中转规则' . PHP_EOL);
         echo('  resetPort - 重置单个用户端口' . PHP_EOL);
@@ -174,7 +170,7 @@ class XCat
 
     public function initdownload()
     {
-        system('git clone https://github.com/xcxnig/ssr-download.git ' . BASE_PATH . '/public/ssr-download/', $ret);
+        system('git clone --depth=3 https://github.com/xcxnig/ssr-download.git ' . BASE_PATH . '/public/ssr-download/ && git gc', $ret);
         echo $ret;
     }
 
@@ -258,22 +254,32 @@ class XCat
     public function setTelegram()
     {
         $bot = new BotApi(Config::get('telegram_token'));
-        if ($bot->setWebhook(Config::get('baseUrl') . '/telegram_callback?token=' . Config::get('telegram_request_token')) == 1) {
+        $ch= curl_init();
+        curl_setopt ($ch, CURLOPT_URL, sprintf('https://api.telegram.org/bot%s/deleteWebhook', Config::get('telegram_token')));
+        curl_setopt ($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt ($ch, CURLOPT_CONNECTTIMEOUT, 5);
+        $deleteWebhookReturn = json_decode(curl_exec($ch));
+        curl_close($ch);
+        if ($deleteWebhookReturn->ok && $deleteWebhookReturn->result && $bot->setWebhook(Config::get('baseUrl') . '/telegram_callback?token=' . Config::get('telegram_request_token')) == 1) {
             echo('设置成功！' . PHP_EOL);
         }
     }
 
     public function initQQWry()
     {
-        echo('downloading....');
-        $qqwry = file_get_contents('https://qqwry.mirror.noc.one/QQWry.Dat');
+        echo('开始下载纯真 IP 数据库....');
+        $qqwry = file_get_contents('https://qqwry.mirror.noc.one/QQWry.Dat?from=sspanel_uim');
         if ($qqwry != '') {
             $fp = fopen(BASE_PATH . '/storage/qqwry.dat', 'wb');
             if ($fp) {
                 fwrite($fp, $qqwry);
                 fclose($fp);
+                echo('纯真 IP 数据库下载成功！');
+            } else {
+                echo('纯真 IP 数据库保存失败！');
             }
-            echo('finish....');
+        } else {
+            echo('下载失败！请重试，或在 https://github.com/SukkaW/qqwry-mirror/issues/new 反馈！');
         }
     }
 
